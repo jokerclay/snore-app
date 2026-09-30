@@ -1093,6 +1093,28 @@ fun TimeSettingDialog(
                         }
                     }
                 }
+
+                HorizontalDivider(color = Color(0xFF2A303C))
+
+                Text("系统防拦截必调权限 (点击直接跳转):", fontSize = 12.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.SemiBold)
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val ctx = LocalContext.current
+                    OutlinedButton(
+                        onClick = { openAutoStartSettings(ctx) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("🚀 自启动管理", fontSize = 11.sp, color = Color.White)
+                    }
+                    OutlinedButton(
+                        onClick = { openAlarmSettings(ctx) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("⏰ 闹钟与提醒", fontSize = 11.sp, color = Color.White)
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1109,4 +1131,48 @@ fun TimeSettingDialog(
         },
         containerColor = Color(0xFF1C222D)
     )
+}
+
+fun openAutoStartSettings(context: Context) {
+    val intents = listOf(
+        Intent().setComponent(android.content.ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")),
+        Intent().setComponent(android.content.ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity")),
+        Intent().setComponent(android.content.ComponentName("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity")),
+        Intent().setComponent(android.content.ComponentName("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity")),
+        Intent().setComponent(android.content.ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.PurviewTabActivity")),
+        Intent().setComponent(android.content.ComponentName("com.samsung.android.lool", "com.samsung.android.sm.ui.battery.BatteryActivity"))
+    )
+    for (intent in intents) {
+        try {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            return
+        } catch (ignored: Exception) {}
+    }
+    // Fallback to app details
+    try {
+        val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.parse("package:${context.packageName}")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(fallback)
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun openAlarmSettings(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        try {
+            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                data = Uri.parse("package:${context.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    } else {
+        Toast.makeText(context, "当前系统版本无需单独授权闹钟权限", Toast.LENGTH_SHORT).show()
+    }
 }
