@@ -9,11 +9,38 @@ import java.io.File
 
 class SnoreRepository(private val context: Context) {
     private val recordsFile = File(context.filesDir, "snore_events.json")
+    private val sessionFile = File(context.filesDir, "last_session.json")
+
     private val _eventsFlow = MutableStateFlow<List<SnoreEvent>>(emptyList())
     val eventsFlow: StateFlow<List<SnoreEvent>> = _eventsFlow.asStateFlow()
 
+    private val _latestSessionFlow = MutableStateFlow<SleepSession?>(null)
+    val latestSessionFlow: StateFlow<SleepSession?> = _latestSessionFlow.asStateFlow()
+
     init {
         loadEvents()
+        loadLatestSession()
+    }
+
+    @Synchronized
+    private fun loadLatestSession() {
+        if (!sessionFile.exists()) return
+        try {
+            val content = sessionFile.readText()
+            _latestSessionFlow.value = SleepSession.fromJson(org.json.JSONObject(content))
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    @Synchronized
+    fun saveSession(session: SleepSession) {
+        try {
+            sessionFile.writeText(session.toJson().toString())
+            _latestSessionFlow.value = session
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     @Synchronized

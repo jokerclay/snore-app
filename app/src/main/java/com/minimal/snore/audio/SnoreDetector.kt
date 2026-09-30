@@ -11,7 +11,7 @@ import kotlin.math.sqrt
  */
 class SnoreDetector(
     private val onDecibelUpdate: (Float) -> Unit,
-    private val onSnoreDetected: (peakDb: Float, durationMs: Long) -> Unit
+    private val onSnoreDetected: (peakDb: Float, durationMs: Long, isApneaSuspect: Boolean) -> Unit
 ) {
     // Dynamic noise floor tracking (starts around 32dB for a quiet bedroom)
     private var noiseFloor = 32.0f
@@ -25,6 +25,7 @@ class SnoreDetector(
     private var burstFrameCount = 0
     private var burstPeakDb = 0f
     private var lastTriggerTime = 0L
+    private var lastSnoreEndTime = 0L
 
     companion object {
         private const val FRAME_DURATION_MS = 100L
@@ -101,7 +102,12 @@ class SnoreDetector(
                     timeSinceLastTrigger > MIN_COOLDOWN_MS
                 ) {
                     lastTriggerTime = currentTime
-                    onSnoreDetected(burstPeakDb, burstDuration)
+                    // If there was a 12s~60s gap of silence after previous snore and this sound is loud, flag suspected apnea
+                    val silenceGap = if (lastSnoreEndTime > 0L) currentTime - lastSnoreEndTime else 0L
+                    val isApneaSuspect = (silenceGap in 12000L..60000L) && burstPeakDb > 54.0f
+                    lastSnoreEndTime = currentTime
+
+                    onSnoreDetected(burstPeakDb, burstDuration, isApneaSuspect)
                 }
 
                 inBurst = false
@@ -116,5 +122,6 @@ class SnoreDetector(
         burstFrameCount = 0
         burstPeakDb = 0f
         noiseFloor = 32.0f
+        lastSnoreEndTime = 0L
     }
 }

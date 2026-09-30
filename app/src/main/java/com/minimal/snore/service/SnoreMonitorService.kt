@@ -18,6 +18,7 @@ import com.minimal.snore.audio.CircularPcmBuffer
 import com.minimal.snore.audio.SnoreDetector
 import com.minimal.snore.audio.WavWriter
 import com.minimal.snore.audio.YamnetClassifier
+import com.minimal.snore.data.SleepSession
 import com.minimal.snore.data.SnoreEvent
 import com.minimal.snore.data.SnoreRepository
 import com.minimal.snore.ui.MainActivity
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
+import java.util.Calendar
 import java.util.UUID
 
 class SnoreMonitorService : Service() {
@@ -34,6 +36,9 @@ class SnoreMonitorService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
+
+    private var sessionStartTime = 0L
+    private val sessionEvents = mutableListOf<SnoreEvent>()
 
     // 5 seconds of 16kHz PCM buffer (16000 samples/sec * 5s = 80,000 samples)
     private val circularBuffer = CircularPcmBuffer(80000)
@@ -54,6 +59,9 @@ class SnoreMonitorService : Service() {
 
         private val _snoreCount = MutableStateFlow(0)
         val snoreCount: StateFlow<Int> = _snoreCount.asStateFlow()
+
+        private val _apneaCount = MutableStateFlow(0)
+        val apneaCount: StateFlow<Int> = _apneaCount.asStateFlow()
 
         fun start(context: Context) {
             val intent = Intent(context, SnoreMonitorService::class.java).apply {
@@ -83,8 +91,8 @@ class SnoreMonitorService : Service() {
             onDecibelUpdate = { db ->
                 _liveDb.value = db
             },
-            onSnoreDetected = { peakDb, durationMs ->
-                onSnoreFound(peakDb, durationMs)
+            onSnoreDetected = { peakDb, durationMs, isApneaSuspect ->
+                onSnoreFound(peakDb, durationMs, isApneaSuspect)
             }
         )
     }
@@ -105,6 +113,9 @@ class SnoreMonitorService : Service() {
 
         _isRunning.value = true
         _snoreCount.value = 0
+        _apneaCount.value = 0
+        sessionStartTime = System.currentTimeMillis()
+        sessionEvents.clear()
         isRecording = true
         detector.reset()
 
@@ -153,7 +164,7 @@ class SnoreMonitorService : Service() {
         }
     }
 
-    private fun onSnoreFound(peakDb: Float, durationMs: Long) {
+    private fun onSnoreFound(peakDb: Float, durationMs: Long, isApneaSuspect: Boolean) {
         val audioSamples = circularBuffer.getRecentSamples(80000)
 
         serviceScope.launch(Dispatchers.Default) {
@@ -172,6 +183,10 @@ class SnoreMonitorService : Service() {
             withContext(Dispatchers.IO) {
                 val timestamp = System.currentTimeMillis()
                 _snoreCount.value += 1
+                if (isApneaSuspect) {
+                    _apneaCount.value += 1
+                }
+
                 val audioDir = File(filesDir, "snore_audio").apply { if (!exists()) mkdirs() }
                 val audioFile = File(audioDir, "snore_${timestamp}.wav")
 
@@ -181,8 +196,10 @@ class SnoreMonitorService : Service() {
                     timestamp = timestamp,
                     durationMs = durationMs,
                     peakDb = peakDb,
-                    audioFilePath = audioFile.absolutePath
+                    audioFilePath = audioFile.absolutePath,
+                    isApneaSuspect = isApneaSuspect
                 )
+                sessionEvents.add(event)
                 repository.addEvent(event)
                 updateNotification("监测中：已检测到 ${_snoreCount.value} 次打呼噜")
             }
@@ -190,6 +207,45 @@ class SnoreMonitorService : Service() {
     }
 
     private fun stopMonitoring() {
+        val endTime = System.currentTimeMillis()
+        val totalMonitoringMs = if (sessionStartTime > 0L) endTime - sessionStartTime else 0L
+
+        // Generate SleepSession summary if monitored for at least 5s or events occurred
+        if (totalMonitoringMs > 5000L || sessionEvents.isNotEmpty()) {
+            val totalSnoreMs = sessionEvents.sumOf { it.durationMs }
+            val maxDb = sessionEvents.maxOfOrNull { it.peakDb } ?: 0f
+            val avgDb = if (sessionEvents.isNotEmpty()) sessionEvents.map { it.peakDb }.average().toFloat() else 0f
+            val lightCount = sessionEvents.count { it.peakDb < 48f }
+            val mediumCount = sessionEvents.count { it.peakDb in 48f..60f }
+            val severeCount = sessionEvents.count { it.peakDb > 60f }
+            val apneaCount = sessionEvents.count { it.isApneaSuspect }
+
+            val hourly = mutableMapOf<Int, Int>()
+            val cal = Calendar.getInstance()
+            for (ev in sessionEvents) {
+                cal.timeInMillis = ev.timestamp
+                val hour = cal.get(Calendar.HOUR_OF_DAY)
+                hourly[hour] = (hourly[hour] ?: 0) + 1
+            }
+
+            val session = SleepSession(
+                id = UUID.randomUUID().toString(),
+                startTime = sessionStartTime,
+                endTime = endTime,
+                totalMonitoringMs = totalMonitoringMs,
+                totalSnoreMs = totalSnoreMs,
+                snoreCount = sessionEvents.size,
+                maxDb = maxDb,
+                avgDb = avgDb,
+                lightSnoreCount = lightCount,
+                mediumSnoreCount = mediumCount,
+                severeSnoreCount = severeCount,
+                apneaSuspectCount = apneaCount,
+                hourlyDistribution = hourly
+            )
+            repository.saveSession(session)
+        }
+
         isRecording = false
         _isRunning.value = false
         cleanupAudio()

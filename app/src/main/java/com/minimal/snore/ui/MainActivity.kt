@@ -15,16 +15,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -33,12 +35,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.minimal.snore.data.SleepSession
 import com.minimal.snore.data.SnoreEvent
 import com.minimal.snore.data.SnoreRepository
 import com.minimal.snore.service.SnoreMonitorService
@@ -110,15 +119,17 @@ fun SnoreAppScreen(
     val context = LocalContext.current
     val repository = remember { SnoreRepository.getInstance(context) }
     val events by repository.eventsFlow.collectAsState()
+    val latestSession by repository.latestSessionFlow.collectAsState()
 
     val isRunning by SnoreMonitorService.isRunning.collectAsState()
     val liveDb by SnoreMonitorService.liveDb.collectAsState()
     val sessionSnoreCount by SnoreMonitorService.snoreCount.collectAsState()
+    val sessionApneaCount by SnoreMonitorService.apneaCount.collectAsState()
 
     var isNightOledMode by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableStateOf(0) } // 0: 睡眠报告, 1: 录音回听
     var playingFilePath by remember { mutableStateOf<String?>(null) }
 
-    // Permissions launcher
     val permissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { perms ->
@@ -147,7 +158,7 @@ fun SnoreAppScreen(
         }
     }
 
-    // Pure Black AMOLED Mode (Touch anywhere to wake up)
+    // Pure Black AMOLED Mode
     if (isNightOledMode) {
         Box(
             modifier = Modifier
@@ -172,10 +183,18 @@ fun SnoreAppScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "已检测打鼾: $sessionSnoreCount 次",
+                    text = "已捕捉打鼾: $sessionSnoreCount 次",
                     color = Color.DarkGray,
                     fontSize = 14.sp
                 )
+                if (sessionApneaCount > 0) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "疑似屏气暂停: $sessionApneaCount 次",
+                        color = Color(0xFF885522),
+                        fontSize = 12.sp
+                    )
+                }
                 Spacer(modifier = Modifier.height(32.dp))
                 Text(
                     text = "点击屏幕任意位置退出微光模式",
@@ -198,7 +217,6 @@ fun SnoreAppScreen(
                     }
                 },
                 actions = {
-                    // Battery Optimization Exemption Shortcut
                     IconButton(onClick = { requestIgnoreBatteryOptimizations(context) }) {
                         Icon(
                             imageVector = Icons.Default.Info,
@@ -206,7 +224,6 @@ fun SnoreAppScreen(
                             tint = Color(0xFFAAAAAA)
                         )
                     }
-                    // Clear history button
                     if (events.isNotEmpty()) {
                         IconButton(onClick = { repository.clearAll() }) {
                             Icon(
@@ -229,16 +246,17 @@ fun SnoreAppScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             // Main Monitoring Control Button
             MonitoringButtonSection(
                 isRunning = isRunning,
                 liveDb = liveDb,
                 snoreCount = sessionSnoreCount,
+                apneaCount = sessionApneaCount,
                 onToggle = {
                     if (isRunning) {
                         SnoreMonitorService.stop(context)
@@ -248,93 +266,420 @@ fun SnoreAppScreen(
                 }
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Decibel & Sensitivity Meter
-            LiveMeterCard(liveDb = liveDb, isRunning = isRunning)
-
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Night AMOLED Mode Switch Button
+            // Live Meter Card
+            LiveMeterCard(liveDb = liveDb, isRunning = isRunning)
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             if (isRunning) {
                 OutlinedButton(
                     onClick = { isNightOledMode = true },
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFF38BDF8)
-                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("🌙 开启夜间纯黑防刺眼模式 (AMOLED省电)")
                 }
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // Recorded Events Title
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Tab Selector: Report vs Audio Clips
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Color(0xFF151922),
+                contentColor = Color.White,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
             ) {
-                Text(
-                    text = "打鼾记录与回听 (${events.size})",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = { Text("📊 睡眠报告", fontSize = 14.sp, fontWeight = FontWeight.Medium) }
                 )
-                if (events.isNotEmpty()) {
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = { Text("🎙️ 录音回听 (${events.size})", fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Tab Content
+            if (selectedTab == 0) {
+                SleepReportTab(session = latestSession)
+            } else {
+                AudioClipsTab(
+                    events = events,
+                    isRunning = isRunning,
+                    playingFilePath = playingFilePath,
+                    onPlayToggle = { event ->
+                        if (playingFilePath == event.audioFilePath) {
+                            onStopAudio()
+                            playingFilePath = null
+                        } else {
+                            onPlayAudio(event.audioFilePath)
+                            playingFilePath = event.audioFilePath
+                        }
+                    },
+                    onDelete = { event ->
+                        if (playingFilePath == event.audioFilePath) {
+                            onStopAudio()
+                            playingFilePath = null
+                        }
+                        repository.deleteEvent(event.id)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SleepReportTab(session: SleepSession?) {
+    if (session == null) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("暂无昨夜完整睡眠报告", color = Color.Gray, fontSize = 15.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text("点击上方大按钮开始入睡监测，晨起点击结束即可生成", color = Color(0xFF555555), fontSize = 12.sp)
+            }
+        }
+        return
+    }
+
+    val scrollState = rememberScrollState()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Severity Grade Banner
+        val gradeColor = when {
+            session.severityLevel.contains("重度") -> Color(0xFFEF4444)
+            session.severityLevel.contains("中度") -> Color(0xFFFBBF24)
+            else -> Color(0xFF34D399)
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF151922))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("睡眠呼吸综合评级", color = Color.Gray, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "仅保留鼾声片段",
-                        fontSize = 12.sp,
-                        color = Color.Gray
+                        text = session.severityLevel,
+                        color = gradeColor,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
-            }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Events List
-            if (events.isEmpty()) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(gradeColor.copy(alpha = 0.15f))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text(
-                        text = if (isRunning) "监测运行中，正在静默捕捉打鼾声..." else "点击上方大按钮开始夜间监测",
-                        color = Color.Gray,
-                        fontSize = 14.sp
+                        text = "打鼾占比 ${String.format(Locale.US, "%.1f", session.snoreBurdenPercent)}%",
+                        color = gradeColor,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+            }
+        }
+
+        // Apnea Alert Card if detected
+        if (session.apneaSuspectCount > 0) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1515))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    items(events, key = { it.id }) { event ->
-                        SnoreEventItem(
-                            event = event,
-                            isPlaying = playingFilePath == event.audioFilePath,
-                            onPlayToggle = {
-                                if (playingFilePath == event.audioFilePath) {
-                                    onStopAudio()
-                                    playingFilePath = null
-                                } else {
-                                    onPlayAudio(event.audioFilePath)
-                                    playingFilePath = event.audioFilePath
-                                }
-                            },
-                            onDelete = {
-                                if (playingFilePath == event.audioFilePath) {
-                                    onStopAudio()
-                                    playingFilePath = null
-                                }
-                                repository.deleteEvent(event.id)
-                            }
+                    Text("⚠️", fontSize = 20.sp)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "检测到 ${session.apneaSuspectCount} 次疑似屏气暂停",
+                            color = Color(0xFFF87171),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "打鼾之间出现 12~60 秒完全无声屏气并伴随剧烈大喘气",
+                            color = Color(0xFFAAAAAA),
+                            fontSize = 11.sp
                         )
                     }
                 }
+            }
+        }
+
+        // 4 Key Metrics Grid
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricBox(
+                title = "监测总时长",
+                value = formatDuration(session.totalMonitoringMs),
+                modifier = Modifier.weight(1f)
+            )
+            MetricBox(
+                title = "累计打鼾时长",
+                value = formatDuration(session.totalSnoreMs),
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricBox(
+                title = "打鼾总次数",
+                value = "${session.snoreCount} 次",
+                modifier = Modifier.weight(1f)
+            )
+            MetricBox(
+                title = "最高峰值分贝",
+                value = "${session.maxDb.toInt()} dB",
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // Loudness Distribution Spectrum
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF151922))
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text("鼾声响度分级分布", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Spectrum 3-color progress bar
+                val total = session.snoreCount.coerceAtLeast(1)
+                val lightRatio = session.lightSnoreCount.toFloat() / total
+                val medRatio = session.mediumSnoreCount.toFloat() / total
+                val severeRatio = session.severeSnoreCount.toFloat() / total
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(12.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF222834))
+                ) {
+                    if (lightRatio > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .weight(lightRatio.coerceAtLeast(0.01f))
+                                .background(Color(0xFF00BFA5))
+                        )
+                    }
+                    if (medRatio > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .weight(medRatio.coerceAtLeast(0.01f))
+                                .background(Color(0xFFFBBF24))
+                        )
+                    }
+                    if (severeRatio > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .weight(severeRatio.coerceAtLeast(0.01f))
+                                .background(Color(0xFFEF4444))
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    LegendItem(color = Color(0xFF00BFA5), label = "轻鼾 (<48dB): ${session.lightSnoreCount}")
+                    LegendItem(color = Color(0xFFFBBF24), label = "中鼾 (48~60): ${session.mediumSnoreCount}")
+                    LegendItem(color = Color(0xFFEF4444), label = "重鼾 (>60dB): ${session.severeSnoreCount}")
+                }
+            }
+        }
+
+        // Hourly Timeline Distribution Chart
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF151922))
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text("整夜时间轴分布 (每小时频次)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(12.dp))
+                HourlyDistributionChart(hourlyMap = session.hourlyDistribution)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+fun HourlyDistributionChart(hourlyMap: Map<Int, Int>) {
+    val textMeasurer = rememberTextMeasurer()
+    val hours = (0..23).filter { hourlyMap.containsKey(it) }.sorted()
+    val displayHours = if (hours.isEmpty()) listOf(0, 1, 2, 3, 4, 5, 6, 7) else hours
+    val maxCount = displayHours.maxOfOrNull { hourlyMap[it] ?: 0 }?.coerceAtLeast(1) ?: 1
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(120.dp)
+    ) {
+        val width = size.width
+        val height = size.height
+        val barAreaHeight = height - 24.dp.toPx()
+        val barCount = displayHours.size
+        val barWidth = (width / barCount) * 0.55f
+        val stepX = width / barCount
+
+        for (i in 0 until barCount) {
+            val hour = displayHours[i]
+            val count = hourlyMap[hour] ?: 0
+            val barHeight = (count.toFloat() / maxCount.toFloat()) * (barAreaHeight - 16.dp.toPx())
+            val x = i * stepX + (stepX - barWidth) / 2f
+            val y = barAreaHeight - barHeight
+
+            // Draw bar
+            drawRoundRect(
+                color = if (count > 0) Color(0xFF38BDF8) else Color(0xFF222834),
+                topLeft = Offset(x, y),
+                size = Size(barWidth, barHeight.coerceAtLeast(4.dp.toPx())),
+                cornerRadius = CornerRadius(4.dp.toPx())
+            )
+
+            // Draw count number on top of bar if count > 0
+            if (count > 0) {
+                val countText = "$count"
+                val textLayoutResult = textMeasurer.measure(
+                    text = countText,
+                    style = TextStyle(color = Color(0xFF38BDF8), fontSize = 10.sp)
+                )
+                drawText(
+                    textMeasurer = textMeasurer,
+                    text = countText,
+                    topLeft = Offset(
+                        x + (barWidth - textLayoutResult.size.width) / 2f,
+                        (y - textLayoutResult.size.height - 2.dp.toPx()).coerceAtLeast(0f)
+                    ),
+                    style = TextStyle(color = Color(0xFF38BDF8), fontSize = 10.sp)
+                )
+            }
+
+            // Draw hour label at bottom
+            val hourLabel = "${hour}h"
+            val labelLayoutResult = textMeasurer.measure(
+                text = hourLabel,
+                style = TextStyle(color = Color.Gray, fontSize = 10.sp)
+            )
+            drawText(
+                textMeasurer = textMeasurer,
+                text = hourLabel,
+                topLeft = Offset(
+                    x + (barWidth - labelLayoutResult.size.width) / 2f,
+                    barAreaHeight + 4.dp.toPx()
+                ),
+                style = TextStyle(color = Color.Gray, fontSize = 10.sp)
+            )
+        }
+    }
+}
+
+@Composable
+fun MetricBox(title: String, value: String, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF151922))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(title, color = Color.Gray, fontSize = 11.sp)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(value, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun LegendItem(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(label, color = Color.LightGray, fontSize = 10.sp)
+    }
+}
+
+@Composable
+fun AudioClipsTab(
+    events: List<SnoreEvent>,
+    isRunning: Boolean,
+    playingFilePath: String?,
+    onPlayToggle: (SnoreEvent) -> Unit,
+    onDelete: (SnoreEvent) -> Unit
+) {
+    if (events.isEmpty()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (isRunning) "监测运行中，正在静默捕捉打鼾声..." else "暂无打鼾录音，点击上方大按钮开始夜间监测",
+                color = Color.Gray,
+                fontSize = 14.sp
+            )
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(events, key = { it.id }) { event ->
+                SnoreEventItem(
+                    event = event,
+                    isPlaying = playingFilePath == event.audioFilePath,
+                    onPlayToggle = { onPlayToggle(event) },
+                    onDelete = { onDelete(event) }
+                )
             }
         }
     }
@@ -345,6 +690,7 @@ fun MonitoringButtonSection(
     isRunning: Boolean,
     liveDb: Float,
     snoreCount: Int,
+    apneaCount: Int,
     onToggle: () -> Unit
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -366,7 +712,7 @@ fun MonitoringButtonSection(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .size(140.dp)
+                .size(130.dp)
                 .scale(scale)
                 .clip(CircleShape)
                 .background(buttonColor.copy(alpha = 0.15f))
@@ -375,7 +721,7 @@ fun MonitoringButtonSection(
         ) {
             Box(
                 modifier = Modifier
-                    .size(105.dp)
+                    .size(98.dp)
                     .clip(CircleShape)
                     .background(buttonColor),
                 contentAlignment = Alignment.Center
@@ -385,28 +731,39 @@ fun MonitoringButtonSection(
                         imageVector = if (isRunning) Icons.Default.Close else Icons.Default.PlayArrow,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(32.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (isRunning) "结束睡眠" else "开始入睡",
                         color = Color.White,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         if (isRunning) {
-            Text(
-                text = "已捕捉打鼾: $snoreCount 次",
-                color = Color(0xFF34D399),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "打鼾: $snoreCount 次",
+                    color = Color(0xFF34D399),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (apneaCount > 0) {
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "疑似屏气: $apneaCount 次",
+                        color = Color(0xFFFBBF24),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         } else {
             Text(
                 text = "锁屏前点击开始，请放置在床头附近",
@@ -421,13 +778,13 @@ fun MonitoringButtonSection(
 fun LiveMeterCard(liveDb: Float, isRunning: Boolean) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF151922))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -435,24 +792,23 @@ fun LiveMeterCard(liveDb: Float, isRunning: Boolean) {
                 Text(
                     text = "实时环境响度",
                     color = Color.Gray,
-                    fontSize = 12.sp
+                    fontSize = 11.sp
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = if (isRunning) "${liveDb.toInt()} dB" else "-- dB",
                     color = if (liveDb > 55f) Color(0xFFFBBF24) else Color.White,
-                    fontSize = 20.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
 
-            // Visual mini progress bar
             val progress = ((liveDb - 20f) / 70f).coerceIn(0f, 1f)
             LinearProgressIndicator(
                 progress = if (isRunning) progress else 0f,
                 modifier = Modifier
                     .width(160.dp)
-                    .height(8.dp)
+                    .height(7.dp)
                     .clip(RoundedCornerShape(4.dp)),
                 color = if (liveDb > 60f) Color(0xFFEF4444) else Color(0xFF00BFA5),
                 trackColor = Color(0xFF222834)
@@ -484,11 +840,10 @@ fun SnoreEventItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Left Play Button
             IconButton(
                 onClick = onPlayToggle,
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
                     .background(if (isPlaying) Color(0xFF00BFA5) else Color(0xFF222834))
             ) {
@@ -501,14 +856,24 @@ fun SnoreEventItem(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Middle info
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "打鼾时间: $formattedTime",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.White
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "打鼾: $formattedTime",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White
+                    )
+                    if (event.isApneaSuspect) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "[⚠️屏气伴随]",
+                            color = Color(0xFFFBBF24),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(2.dp))
                 Row {
                     Text(
@@ -520,21 +885,32 @@ fun SnoreEventItem(
                     Text(
                         text = "峰值: ${event.peakDb.toInt()} dB",
                         fontSize = 12.sp,
-                        color = if (event.peakDb > 65f) Color(0xFFF87171) else Color(0xFF34D399)
+                        color = if (event.peakDb > 60f) Color(0xFFF87171) else Color(0xFF34D399)
                     )
                 }
             }
 
-            // Right Delete Button
             IconButton(onClick = onDelete) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "删除",
                     tint = Color.Gray,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
+    }
+}
+
+fun formatDuration(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return when {
+        hours > 0 -> "${hours}小时${minutes}分"
+        minutes > 0 -> "${minutes}分${seconds}秒"
+        else -> "${seconds}秒"
     }
 }
 
