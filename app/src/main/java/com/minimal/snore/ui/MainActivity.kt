@@ -163,9 +163,33 @@ fun SnoreAppScreen(
     ) { perms ->
         val recordAudioGranted = perms[Manifest.permission.RECORD_AUDIO] == true
         if (recordAudioGranted) {
-            SnoreMonitorService.start(context)
+            if (appSettings.autoEnabled && appSettings.isInNightWindow() && !SnoreMonitorService.isRunning.value) {
+                SnoreMonitorService.start(context)
+                Toast.makeText(context, "已在夜间入睡时间段，已自动开启打鼾监测", Toast.LENGTH_SHORT).show()
+            }
         } else {
             Toast.makeText(context, "需要麦克风权限以检测打鼾", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val needed = mutableListOf<String>()
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                needed.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        if (needed.isNotEmpty()) {
+            permissionsLauncher.launch(needed.toTypedArray())
+        } else {
+            // Permissions already granted! If inside night window and monitoring not running, start right away!
+            if (appSettings.autoEnabled && appSettings.isInNightWindow() && !SnoreMonitorService.isRunning.value) {
+                SnoreMonitorService.start(context)
+                Toast.makeText(context, "当前已处于夜间入睡时间，已自动开启监测", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -310,6 +334,9 @@ fun SnoreAppScreen(
                     autoEnabled = enabled
                     appSettings.autoEnabled = enabled
                     AutoSleepScheduler.scheduleAlarms(context)
+                    if (enabled && appSettings.isInNightWindow() && !SnoreMonitorService.isRunning.value) {
+                        requestStartService()
+                    }
                 },
                 onEditTimes = { showTimeDialog = true }
             )
@@ -330,6 +357,9 @@ fun SnoreAppScreen(
                         appSettings.wakeupMinute = wakeM
                         AutoSleepScheduler.scheduleAlarms(context)
                         showTimeDialog = false
+                        if (appSettings.autoEnabled && appSettings.isInNightWindow() && !SnoreMonitorService.isRunning.value) {
+                            requestStartService()
+                        }
                     }
                 )
             }

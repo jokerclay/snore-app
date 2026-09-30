@@ -78,6 +78,9 @@ object AutoSleepScheduler {
                 alarmManager.setExact(AlarmManager.RTC_WAKEUP, bedCalendar.timeInMillis, bedIntent)
                 alarmManager.setExact(AlarmManager.RTC_WAKEUP, wakeCalendar.timeInMillis, wakeIntent)
             }
+        } catch (e: SecurityException) {
+            alarmManager.set(AlarmManager.RTC_WAKEUP, bedCalendar.timeInMillis, bedIntent)
+            alarmManager.set(AlarmManager.RTC_WAKEUP, wakeCalendar.timeInMillis, wakeIntent)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -102,6 +105,8 @@ object AutoSleepScheduler {
             } else {
                 alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAtMillis, retryIntent)
             }
+        } catch (e: SecurityException) {
+            alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAtMillis, retryIntent)
         } catch (e: Exception) {
             e.printStackTrace()
         }
