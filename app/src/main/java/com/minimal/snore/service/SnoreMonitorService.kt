@@ -17,6 +17,7 @@ import com.minimal.snore.SnoreApplication
 import com.minimal.snore.audio.CircularPcmBuffer
 import com.minimal.snore.audio.SnoreDetector
 import com.minimal.snore.audio.WavWriter
+import com.minimal.snore.audio.YamnetClassifier
 import com.minimal.snore.data.SnoreEvent
 import com.minimal.snore.data.SnoreRepository
 import com.minimal.snore.ui.MainActivity
@@ -38,6 +39,7 @@ class SnoreMonitorService : Service() {
     private val circularBuffer = CircularPcmBuffer(80000)
     private lateinit var detector: SnoreDetector
     private lateinit var repository: SnoreRepository
+    private var yamnetClassifier: YamnetClassifier? = null
 
     companion object {
         const val ACTION_START = "ACTION_START"
@@ -75,6 +77,7 @@ class SnoreMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
         repository = SnoreRepository.getInstance(applicationContext)
+        yamnetClassifier = YamnetClassifier(applicationContext)
 
         detector = SnoreDetector(
             onDecibelUpdate = { db ->
@@ -151,25 +154,38 @@ class SnoreMonitorService : Service() {
     }
 
     private fun onSnoreFound(peakDb: Float, durationMs: Long) {
-        val timestamp = System.currentTimeMillis()
-        _snoreCount.value += 1
-
-        // Capture last 5 seconds (80,000 samples)
         val audioSamples = circularBuffer.getRecentSamples(80000)
-        val audioDir = File(filesDir, "snore_audio").apply { if (!exists()) mkdirs() }
-        val audioFile = File(audioDir, "snore_${timestamp}.wav")
 
-        serviceScope.launch(Dispatchers.IO) {
-            WavWriter.writeWavFile(audioFile, audioSamples, 16000)
-            val event = SnoreEvent(
-                id = UUID.randomUUID().toString(),
-                timestamp = timestamp,
-                durationMs = durationMs,
-                peakDb = peakDb,
-                audioFilePath = audioFile.absolutePath
-            )
-            repository.addEvent(event)
-            updateNotification("监测中：已检测到 ${_snoreCount.value} 次打呼噜")
+        serviceScope.launch(Dispatchers.Default) {
+            // AI Verification Step:
+            // Extract recent 0.975s (15600 samples) and classify with YAMNet
+            val aiCheckSamples = circularBuffer.getRecentSamples(YamnetClassifier.SAMPLES_REQUIRED)
+            val result = yamnetClassifier?.classify(aiCheckSamples)
+
+            // If classified as airplane, vehicle noise or not a snore, discard it
+            if (result != null && (!result.isSnore || result.isAirplaneOrTraffic)) {
+                android.util.Log.d("SnoreService", "Filtered out noise: ${result.topCategory} (score: ${result.topScore})")
+                return@launch
+            }
+
+            // Confirmed human snoring: save audio and record event
+            withContext(Dispatchers.IO) {
+                val timestamp = System.currentTimeMillis()
+                _snoreCount.value += 1
+                val audioDir = File(filesDir, "snore_audio").apply { if (!exists()) mkdirs() }
+                val audioFile = File(audioDir, "snore_${timestamp}.wav")
+
+                WavWriter.writeWavFile(audioFile, audioSamples, 16000)
+                val event = SnoreEvent(
+                    id = UUID.randomUUID().toString(),
+                    timestamp = timestamp,
+                    durationMs = durationMs,
+                    peakDb = peakDb,
+                    audioFilePath = audioFile.absolutePath
+                )
+                repository.addEvent(event)
+                updateNotification("监测中：已检测到 ${_snoreCount.value} 次打呼噜")
+            }
         }
     }
 
@@ -244,6 +260,8 @@ class SnoreMonitorService : Service() {
 
     override fun onDestroy() {
         stopMonitoring()
+        yamnetClassifier?.close()
+        yamnetClassifier = null
         serviceScope.cancel()
         super.onDestroy()
     }
