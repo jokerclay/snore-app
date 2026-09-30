@@ -48,11 +48,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.minimal.snore.data.AppSettings
+import com.minimal.snore.data.DataExportManager
 import com.minimal.snore.data.SleepSession
 import com.minimal.snore.data.SnoreEvent
 import com.minimal.snore.data.SnoreRepository
+import com.minimal.snore.data.StorageUsage
 import com.minimal.snore.receiver.AutoSleepScheduler
 import com.minimal.snore.service.SnoreMonitorService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -144,6 +149,8 @@ fun SnoreAppScreen(
     val repository = remember { SnoreRepository.getInstance(context) }
     val events by repository.eventsFlow.collectAsState()
     val latestSession by repository.latestSessionFlow.collectAsState()
+    val allSessions by repository.sessionsHistoryFlow.collectAsState()
+    val storageUsage by repository.storageUsageFlow.collectAsState()
 
     val isRunning by SnoreMonitorService.isRunning.collectAsState()
     val liveDb by SnoreMonitorService.liveDb.collectAsState()
@@ -376,7 +383,7 @@ fun SnoreAppScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // Tab Selector: Report vs Audio Clips
+            // Tab Selector: Report vs Audio Clips vs Data Export
             TabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = Color(0xFF151922),
@@ -388,22 +395,26 @@ fun SnoreAppScreen(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text("📊 睡眠报告", fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+                    text = { Text("📊 报告", fontSize = 13.sp, fontWeight = FontWeight.Medium) }
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("🎙️ 录音回听 (${events.size})", fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+                    text = { Text("🎙️ 录音 (${events.size})", fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+                )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    text = { Text("💾 导出 (${storageUsage.totalFormatted})", fontSize = 13.sp, fontWeight = FontWeight.Medium) }
                 )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
             // Tab Content
-            if (selectedTab == 0) {
-                SleepReportTab(session = latestSession)
-            } else {
-                AudioClipsTab(
+            when (selectedTab) {
+                0 -> SleepReportTab(session = latestSession)
+                1 -> AudioClipsTab(
                     events = events,
                     isRunning = isRunning,
                     playingFilePath = playingFilePath,
@@ -422,6 +433,15 @@ fun SnoreAppScreen(
                             playingFilePath = null
                         }
                         repository.deleteEvent(event.id)
+                    }
+                )
+                2 -> DataBackupTab(
+                    storageUsage = storageUsage,
+                    sessions = allSessions,
+                    events = events,
+                    onClearAudio = {
+                        val freed = repository.clearAudioFilesOnly()
+                        Toast.makeText(context, "已释放 ${StorageUsage.formatBytes(freed)} 音频空间！", Toast.LENGTH_SHORT).show()
                     }
                 )
             }
@@ -1226,5 +1246,213 @@ fun openAlarmSettings(context: Context) {
         }
     } else {
         Toast.makeText(context, "当前系统版本无需单独授权闹钟权限", Toast.LENGTH_SHORT).show()
+    }
+}
+
+@Composable
+fun DataBackupTab(
+    storageUsage: StorageUsage,
+    sessions: List<SleepSession>,
+    events: List<SnoreEvent>,
+    onClearAudio: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isExporting by remember { mutableStateOf(false) }
+    var showConfirmCleanDialog by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+
+    if (showConfirmCleanDialog) {
+        AlertDialog(
+            onDismissRequest = { showConfirmCleanDialog = false },
+            title = { Text("清理历史录音音频？", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Text(
+                    "这将清空本地所有 5 秒打鼾录音 WAV 文件以释放存储空间。\n\n请放心：所有历史睡眠健康报告、打鼾统计趋势和评分图表将永远完整保留！",
+                    color = Color.LightGray,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onClearAudio()
+                    showConfirmCleanDialog = false
+                }) {
+                    Text("确认清理", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmCleanDialog = false }) {
+                    Text("取消", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF151922)
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Storage Overview Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF151922))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("💾 本地数据沉淀", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("自安装起持续在手机私有空间保存", color = Color.Gray, fontSize = 11.sp)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF00BFA5).copy(alpha = 0.15f))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = storageUsage.totalFormatted,
+                            color = Color(0xFF00BFA5),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MetricBox(
+                        title = "累计监测天数",
+                        value = "${storageUsage.sessionCount} 天",
+                        modifier = Modifier.weight(1f)
+                    )
+                    MetricBox(
+                        title = "捕获鼾声总数",
+                        value = "${storageUsage.snoreCount} 次",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Breakdown list
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("🎙️ 音频切片 (WAV):", color = Color.LightGray, fontSize = 12.sp)
+                    Text(storageUsage.audioFormatted, color = Color(0xFF38BDF8), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("📊 历史报告指标 (JSON):", color = Color.LightGray, fontSize = 12.sp)
+                    Text(storageUsage.reportFormatted, color = Color(0xFF34D399), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
+        // Export Actions Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF151922))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("一键全量导出与备份", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "打包所有历史天数的 CSV 报表、JSON 原始数据和 WAV 原声切片为一个标准 ZIP 压缩包，可直接发送到电脑用 Excel / Python 深度分析。",
+                    color = Color.Gray,
+                    fontSize = 12.sp
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = {
+                        if (isExporting) return@Button
+                        scope.launch(Dispatchers.IO) {
+                            isExporting = true
+                            try {
+                                val zipFile = DataExportManager.exportAllData(context, sessions, events)
+                                withContext(Dispatchers.Main) {
+                                    isExporting = false
+                                    DataExportManager.shareZipFile(context, zipFile)
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                withContext(Dispatchers.Main) {
+                                    isExporting = false
+                                    Toast.makeText(context, "打包导出失败: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFA5)),
+                    enabled = !isExporting && (sessions.isNotEmpty() || events.isNotEmpty())
+                ) {
+                    if (isExporting) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("正在生成全量 ZIP 数据包...", color = Color.White, fontSize = 14.sp)
+                    } else {
+                        Icon(imageVector = Icons.Default.Share, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("📦 一键打包导出全量数据包 (.zip)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedButton(
+                    onClick = { showConfirmCleanDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+                    enabled = storageUsage.audioBytes > 0L
+                ) {
+                    Icon(imageVector = Icons.Default.Delete, contentDescription = null, tint = Color(0xFFEF4444))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("🗑️ 仅清理历史录音 (保留全部图表指标)", fontSize = 13.sp)
+                }
+            }
+        }
+
+        // Data Structure Description Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF151922))
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text("📁 ZIP 导出的数据组织结构", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("• sleep_sessions.csv - 历史整夜汇总表 (Excel/Pandas 开箱即用)", color = Color(0xFF38BDF8), fontSize = 11.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("• sleep_sessions.json - 24 小时打鼾分布结构化原始数据", color = Color(0xFF34D399), fontSize = 11.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("• snore_events.csv - 每一声打鼾的精确时间戳、分贝与屏气标记", color = Color.LightGray, fontSize = 11.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("• audio/*.wav - 16kHz 16-bit 单声道打鼾原声切片", color = Color.LightGray, fontSize = 11.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
