@@ -27,8 +27,8 @@ jobs:
 
       - name: Ensure Gradle Wrapper
         run: |
-          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            echo "Generating gradle wrapper jar..."
+          if [ ! -f gradlew ]; then
+            echo "Generating gradle wrapper..."
             gradle wrapper --gradle-version 8.4
           fi
           chmod +x gradlew
