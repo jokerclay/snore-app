@@ -5,7 +5,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.PowerManager
 import com.minimal.snore.data.AppSettings
 import com.minimal.snore.service.SnoreMonitorService
 import java.util.Calendar
@@ -15,6 +14,11 @@ object AutoSleepScheduler {
     const val ACTION_WAKEUP = "com.minimal.snore.ACTION_WAKEUP"
     const val ACTION_RETRY_CHECK = "com.minimal.snore.ACTION_RETRY_CHECK"
 
+    /**
+     * 统一调度入口：
+     * 1. 若当前已在设置的睡眠区间内且未启动，立即尝试强行开启并预约巡检；
+     * 2. 设定每日入睡点 (Bedtime) 与起床点 (Wakeup) 定时闹钟。
+     */
     fun scheduleAlarms(context: Context) {
         val settings = AppSettings.getInstance(context)
         if (!settings.autoEnabled) {
@@ -24,24 +28,15 @@ object AutoSleepScheduler {
 
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
 
-        // 1. If currently already inside night sleep window and monitoring has not started:
+        // 1. 如果当前已经处于设定的夜间区间内，且服务尚未跑起来：立即强行尝试启动
         if (settings.isInNightWindow() && !SnoreMonitorService.isRunning.value) {
-            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-            val isScreenOn = powerManager?.isInteractive ?: false
-
-            if (!isScreenOn) {
-                // Screen is already dark/locked: trigger night start check immediately!
-                val triggerIntent = Intent(context, AutoSleepReceiver::class.java).apply {
-                    action = ACTION_BEDTIME
-                }
-                context.sendBroadcast(triggerIntent)
-            } else {
-                // User is currently using phone: schedule short interval retry check
-                scheduleRetryCheck(context, 10)
+            val triggerIntent = Intent(context, AutoSleepReceiver::class.java).apply {
+                action = ACTION_BEDTIME
             }
+            context.sendBroadcast(triggerIntent)
         }
 
-        // 2. Bedtime Alarm (for next occurrence)
+        // 2. 预约每日入睡闹钟 (Bedtime Alarm)
         val bedCalendar = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, settings.bedtimeHour)
             set(Calendar.MINUTE, settings.bedtimeMinute)
@@ -58,7 +53,7 @@ object AutoSleepScheduler {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // 3. Wakeup Alarm (for next occurrence)
+        // 3. 预约每日早晨起床闹钟 (Wakeup Alarm)
         val wakeCalendar = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, settings.wakeupHour)
             set(Calendar.MINUTE, settings.wakeupMinute)
@@ -89,11 +84,9 @@ object AutoSleepScheduler {
     }
 
     /**
-     * Schedules a periodic retry alarm (e.g. 10 minutes later) during the night window
-     * while the user is still actively using the phone (screen ON).
-     * Once the user locks their screen to sleep, the next check will auto-start monitoring.
+     * 在设定的睡眠时间区间内，只要还没开启，就持续巡检并尽力强行拉起或提醒
      */
-    fun scheduleRetryCheck(context: Context, delayMinutes: Int = 10) {
+    fun scheduleRetryCheck(context: Context, delayMinutes: Int = 15) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val retryIntent = PendingIntent.getBroadcast(
             context,

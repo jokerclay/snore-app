@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        checkAutoStart(intent)
 
         setContent {
             MaterialTheme(
@@ -84,6 +85,22 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AutoSleepScheduler.scheduleAlarms(this)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        checkAutoStart(intent)
+    }
+
+    private fun checkAutoStart(intent: Intent?) {
+        if (intent?.getBooleanExtra("EXTRA_AUTO_START", false) == true) {
+            val hasRecordPerm = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (hasRecordPerm) {
+                SnoreMonitorService.start(this)
+            }
+        }
     }
 
     private fun playAudioClip(filePath: String) {

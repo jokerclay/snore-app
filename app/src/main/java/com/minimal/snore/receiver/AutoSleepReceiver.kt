@@ -6,7 +6,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.minimal.snore.R
 import com.minimal.snore.SnoreApplication
@@ -26,14 +25,14 @@ class AutoSleepReceiver : BroadcastReceiver() {
 
         when (action) {
             Intent.ACTION_POWER_CONNECTED -> {
-                // Plugged in during night window (handles any time between bedtime and wakeup)
+                // 插电时：若在设定作息时间内且未运行，强行尝试启动
                 if (settings.autoEnabled && settings.isInNightWindow()) {
-                    handleNightTrigger(context, "检测到夜间入睡充电")
+                    forceStartOrNotify(context, "已在设定的睡眠时间段内")
                 }
             }
 
             Intent.ACTION_POWER_DISCONNECTED -> {
-                // Unplugged in the morning
+                // 拔掉充电器
                 dismissPromptNotification(context)
                 if (settings.autoEnabled && SnoreMonitorService.isRunning.value) {
                     SnoreMonitorService.stop(context)
@@ -42,27 +41,24 @@ class AutoSleepReceiver : BroadcastReceiver() {
 
             AutoSleepScheduler.ACTION_BEDTIME,
             AutoSleepScheduler.ACTION_RETRY_CHECK -> {
-                if (!settings.autoEnabled || SnoreMonitorService.isRunning.value) {
+                if (!settings.autoEnabled) {
+                    dismissPromptNotification(context)
                     return
                 }
 
-                // If currently inside night window:
-                if (settings.isInNightWindow()) {
-                    val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-                    val isScreenOn = powerManager?.isInteractive ?: false
+                // 若已经在运行中，无需再开，直接清除提醒通知
+                if (SnoreMonitorService.isRunning.value) {
+                    dismissPromptNotification(context)
+                    return
+                }
 
-                    if (!isScreenOn) {
-                        // Screen is locked/off: auto start monitoring!
-                        handleNightTrigger(context, "夜间作息熄屏自动监测")
-                    } else {
-                        // User is still using phone (screen ON):
-                        // Show lock screen prompt AND schedule a retry in 10 minutes so that
-                        // when the user finishes using the phone and locks it, it starts!
-                        showBedtimePromptNotification(context, "已到夜间入睡时间，锁屏后点击立即开始监测")
-                        AutoSleepScheduler.scheduleRetryCheck(context, 10)
-                    }
+                // 判断是否在用户设置的睡眠时间区间内
+                if (settings.isInNightWindow()) {
+                    // 在区间内：尽全力强行开！开不了就通知用户点开，并且安排下一次重试巡检
+                    forceStartOrNotify(context, "已到设定的睡眠监测时间")
+                    AutoSleepScheduler.scheduleRetryCheck(context, 15)
                 } else {
-                    // Left night window: clean up prompts and schedule normal cycle
+                    // 已经不在区间内：清理提醒，重新排定常规每日闹钟
                     dismissPromptNotification(context)
                     AutoSleepScheduler.scheduleAlarms(context)
                 }
@@ -83,22 +79,25 @@ class AutoSleepReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun handleNightTrigger(context: Context, reasonText: String) {
+    /**
+     * 强行启动监测服务。
+     * 如果系统因为 Android 12/14 后台限制拦截了录音启动，则立即弹出高优先级全屏/锁屏提醒卡片，
+     * 附带 [▶ 立即开启监测] 按钮，方便用户一键开启。
+     */
+    private fun forceStartOrNotify(context: Context, reasonText: String) {
         if (SnoreMonitorService.isRunning.value) return
 
         var started = false
         try {
-            // Attempt direct start (works on Android 11 and below, or when permitted by OEM autostart)
             SnoreMonitorService.start(context)
             started = true
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
-        // On Android 12/14 where background start of microphone service is blocked,
-        // display the high-priority lock screen prompt so user can tap once to start!
+        // 如果直接启动被系统拦截或尚未处于 running 状态，强提醒用户开启
         if (!started || !SnoreMonitorService.isRunning.value) {
-            showBedtimePromptNotification(context, "$reasonText，点击开启监测")
+            showBedtimePromptNotification(context, "$reasonText，点击立即开启监测")
         }
     }
 
