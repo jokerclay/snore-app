@@ -192,12 +192,7 @@ fun SnoreAppScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Bedtime,
-                            contentDescription = null,
-                            tint = Color(0xFF38BDF8),
-                            modifier = Modifier.size(24.dp)
-                        )
+                        Text("🌙", fontSize = 22.sp)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("打鼾监测 (Snore App)", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     }
@@ -206,7 +201,7 @@ fun SnoreAppScreen(
                     // Battery Optimization Exemption Shortcut
                     IconButton(onClick = { requestIgnoreBatteryOptimizations(context) }) {
                         Icon(
-                            imageVector = Icons.Default.BatteryChargingFull,
+                            imageVector = Icons.Default.Info,
                             contentDescription = "电池优化设置",
                             tint = Color(0xFFAAAAAA)
                         )
@@ -215,7 +210,7 @@ fun SnoreAppScreen(
                     if (events.isNotEmpty()) {
                         IconButton(onClick = { repository.clearAll() }) {
                             Icon(
-                                imageVector = Icons.Default.DeleteSweep,
+                                imageVector = Icons.Default.Delete,
                                 contentDescription = "清空所有记录",
                                 tint = Color(0xFFAAAAAA)
                             )
@@ -270,9 +265,7 @@ fun SnoreAppScreen(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(imageVector = Icons.Default.Brightness2, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("开启夜间纯黑防刺眼模式 (AMOLED省电)")
+                    Text("🌙 开启夜间纯黑防刺眼模式 (AMOLED省电)")
                 }
                 Spacer(modifier = Modifier.height(12.dp))
             }
@@ -389,7 +382,7 @@ fun MonitoringButtonSection(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
-                        imageVector = if (isRunning) Icons.Default.Stop else Icons.Default.Bedtime,
+                        imageVector = if (isRunning) Icons.Default.Close else Icons.Default.PlayArrow,
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(34.dp)
@@ -456,7 +449,7 @@ fun LiveMeterCard(liveDb: Float, isRunning: Boolean) {
             // Visual mini progress bar
             val progress = ((liveDb - 20f) / 70f).coerceIn(0f, 1f)
             LinearProgressIndicator(
-                progress = { if (isRunning) progress else 0f },
+                progress = if (isRunning) progress else 0f,
                 modifier = Modifier
                     .width(160.dp)
                     .height(8.dp)
