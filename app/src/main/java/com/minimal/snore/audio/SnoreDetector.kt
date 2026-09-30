@@ -10,6 +10,8 @@ import kotlin.math.sqrt
  * Runs on 100ms frames (1600 samples at 16kHz).
  */
 class SnoreDetector(
+    var calibrationOffset: Float = 0.0f,
+    var timeProvider: () -> Long = { System.currentTimeMillis() },
     private val onDecibelUpdate: (Float) -> Unit,
     private val onSnoreDetected: (peakDb: Float, durationMs: Long, isApneaSuspect: Boolean) -> Unit
 ) {
@@ -57,9 +59,9 @@ class SnoreDetector(
         }
 
         val rms = sqrt(sumSquares / length)
-        // Approximate SPL decibels (calibrated roughly for Android internal mic)
+        // Approximate SPL decibels with calibration offset compensation
         val rawDb = if (rms > 1.0) 20.0 * log10(rms) else 0.0
-        val currentDb = min(95.0f, max(20.0f, (rawDb * 1.08f).toFloat()))
+        val currentDb = min(95.0f, max(20.0f, (rawDb * 1.08f).toFloat() + calibrationOffset))
 
         onDecibelUpdate(currentDb)
 
@@ -72,7 +74,7 @@ class SnoreDetector(
             noiseFloor = noiseFloor * 0.96f + currentDb * 0.04f
         }
 
-        val currentTime = System.currentTimeMillis()
+        val currentTime = timeProvider()
         val triggerLevel = max(42.0f, noiseFloor + triggerThresholdOffset)
 
         // Snore characteristics:

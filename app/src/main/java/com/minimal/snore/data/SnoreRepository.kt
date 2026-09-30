@@ -1,11 +1,13 @@
 package com.minimal.snore.data
 
 import android.content.Context
+import androidx.core.util.AtomicFile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
 
 data class StorageUsage(
@@ -58,15 +60,39 @@ class SnoreRepository(private val context: Context) {
         updateStorageUsage()
     }
 
+    private fun writeAtomic(file: File, content: String) {
+        val atomicFile = AtomicFile(file)
+        var fos: FileOutputStream? = null
+        try {
+            fos = atomicFile.startWrite()
+            fos.write(content.toByteArray(Charsets.UTF_8))
+            atomicFile.finishWrite(fos)
+        } catch (e: Exception) {
+            if (fos != null) atomicFile.failWrite(fos)
+            e.printStackTrace()
+        }
+    }
+
+    private fun readAtomic(file: File): String? {
+        val atomicFile = AtomicFile(file)
+        val backup = File("${atomicFile.baseFile.path}.bak")
+        if (!atomicFile.baseFile.exists() && !backup.exists()) return null
+        return try {
+            atomicFile.openRead().use { it.bufferedReader(Charsets.UTF_8).readText() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
     @Synchronized
     private fun loadLatestSession() {
         if (_sessionsHistoryFlow.value.isNotEmpty()) {
             _latestSessionFlow.value = _sessionsHistoryFlow.value.first()
             return
         }
-        if (!sessionFile.exists()) return
+        val content = readAtomic(sessionFile) ?: return
         try {
-            val content = sessionFile.readText()
             _latestSessionFlow.value = SleepSession.fromJson(org.json.JSONObject(content))
         } catch (e: Exception) {
             e.printStackTrace()
@@ -75,11 +101,13 @@ class SnoreRepository(private val context: Context) {
 
     @Synchronized
     private fun loadSessionsHistory() {
-        if (!sessionsHistoryFile.exists()) {
+        val content = readAtomic(sessionsHistoryFile)
+        if (content == null) {
             // Check if last_session.json exists to migrate
-            if (sessionFile.exists()) {
+            val legacyContent = readAtomic(sessionFile)
+            if (legacyContent != null) {
                 try {
-                    val s = SleepSession.fromJson(org.json.JSONObject(sessionFile.readText()))
+                    val s = SleepSession.fromJson(org.json.JSONObject(legacyContent))
                     val list = listOf(s)
                     saveSessionsHistory(list)
                     _sessionsHistoryFlow.value = list
@@ -91,7 +119,6 @@ class SnoreRepository(private val context: Context) {
         }
 
         try {
-            val content = sessionsHistoryFile.readText()
             val jsonArray = JSONArray(content)
             val list = mutableListOf<SleepSession>()
             for (i in 0 until jsonArray.length()) {
@@ -108,7 +135,7 @@ class SnoreRepository(private val context: Context) {
     fun saveSession(session: SleepSession) {
         try {
             // 1. Save as latest session
-            sessionFile.writeText(session.toJson().toString())
+            writeAtomic(sessionFile, session.toJson().toString())
             _latestSessionFlow.value = session
 
             // 2. Append to full history
@@ -129,7 +156,7 @@ class SnoreRepository(private val context: Context) {
         try {
             val jsonArray = JSONArray()
             list.forEach { jsonArray.put(it.toJson()) }
-            sessionsHistoryFile.writeText(jsonArray.toString())
+            writeAtomic(sessionsHistoryFile, jsonArray.toString())
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -137,13 +164,13 @@ class SnoreRepository(private val context: Context) {
 
     @Synchronized
     private fun loadEvents() {
-        if (!recordsFile.exists()) {
+        val content = readAtomic(recordsFile)
+        if (content == null) {
             _eventsFlow.value = emptyList()
             return
         }
 
         try {
-            val content = recordsFile.readText()
             val jsonArray = JSONArray(content)
             val list = mutableListOf<SnoreEvent>()
             for (i in 0 until jsonArray.length()) {
@@ -186,7 +213,7 @@ class SnoreRepository(private val context: Context) {
         }
         saveList(emptyList())
         saveSessionsHistory(emptyList())
-        if (sessionFile.exists()) sessionFile.delete()
+        AtomicFile(sessionFile).delete()
         _latestSessionFlow.value = null
         _sessionsHistoryFlow.value = emptyList()
         updateStorageUsage()
@@ -214,7 +241,7 @@ class SnoreRepository(private val context: Context) {
         try {
             val jsonArray = JSONArray()
             list.forEach { jsonArray.put(it.toJson()) }
-            recordsFile.writeText(jsonArray.toString())
+            writeAtomic(recordsFile, jsonArray.toString())
             _eventsFlow.value = list
         } catch (e: Exception) {
             e.printStackTrace()
@@ -231,9 +258,14 @@ class SnoreRepository(private val context: Context) {
         }
 
         var reportBytes = 0L
-        if (recordsFile.exists()) reportBytes += recordsFile.length()
-        if (sessionFile.exists()) reportBytes += sessionFile.length()
-        if (sessionsHistoryFile.exists()) reportBytes += sessionsHistoryFile.length()
+        val recordsBak = File("${recordsFile.path}.bak")
+        if (recordsFile.exists()) reportBytes += recordsFile.length() else if (recordsBak.exists()) reportBytes += recordsBak.length()
+
+        val sessionBak = File("${sessionFile.path}.bak")
+        if (sessionFile.exists()) reportBytes += sessionFile.length() else if (sessionBak.exists()) reportBytes += sessionBak.length()
+
+        val historyBak = File("${sessionsHistoryFile.path}.bak")
+        if (sessionsHistoryFile.exists()) reportBytes += sessionsHistoryFile.length() else if (historyBak.exists()) reportBytes += historyBak.length()
 
         val totalBytes = audioBytes + reportBytes
         val sessionsCount = _sessionsHistoryFlow.value.size

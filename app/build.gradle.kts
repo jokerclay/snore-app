@@ -56,7 +56,12 @@ android {
     androidResources {
         noCompress += "tflite"
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
+
 
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
@@ -74,4 +79,10 @@ dependencies {
 
     // Google TensorFlow Lite for YAMNet audio classification
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
+
+    // Unit Testing
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20231013")
 }
+
+

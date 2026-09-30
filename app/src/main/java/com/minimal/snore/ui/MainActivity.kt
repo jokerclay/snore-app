@@ -109,6 +109,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun playAudioClip(filePath: String) {
+        if (filePath.isEmpty() || !File(filePath).exists()) {
+            Toast.makeText(this, "录音文件不存在或因空间不足未保存", Toast.LENGTH_SHORT).show()
+            return
+        }
         try {
             stopAudioClip()
             mediaPlayer = MediaPlayer().apply {
@@ -356,12 +360,14 @@ fun SnoreAppScreen(
                     initialBedtimeMinute = appSettings.bedtimeMinute,
                     initialWakeupHour = appSettings.wakeupHour,
                     initialWakeupMinute = appSettings.wakeupMinute,
+                    initialCalibration = appSettings.micCalibration,
                     onDismiss = { showTimeDialog = false },
-                    onConfirm = { bedH, bedM, wakeH, wakeM ->
+                    onConfirm = { bedH, bedM, wakeH, wakeM, cal ->
                         appSettings.bedtimeHour = bedH
                         appSettings.bedtimeMinute = bedM
                         appSettings.wakeupHour = wakeH
                         appSettings.wakeupMinute = wakeM
+                        appSettings.micCalibration = cal
                         AutoSleepScheduler.scheduleAlarms(context)
                         showTimeDialog = false
                         if (appSettings.autoEnabled && appSettings.isInNightWindow() && !SnoreMonitorService.isRunning.value) {
@@ -413,7 +419,7 @@ fun SnoreAppScreen(
 
             // Tab Content
             when (selectedTab) {
-                0 -> SleepReportTab(session = latestSession)
+                0 -> SleepReportTab(sessions = allSessions)
                 1 -> AudioClipsTab(
                     events = events,
                     isRunning = isRunning,
@@ -450,8 +456,8 @@ fun SnoreAppScreen(
 }
 
 @Composable
-fun SleepReportTab(session: SleepSession?) {
-    if (session == null) {
+fun SleepReportTab(sessions: List<SleepSession>) {
+    if (sessions.isEmpty()) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -459,13 +465,17 @@ fun SleepReportTab(session: SleepSession?) {
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("暂无昨夜完整睡眠报告", color = Color.Gray, fontSize = 15.sp)
+                Text("暂无睡眠报告数据", color = Color.Gray, fontSize = 15.sp)
                 Spacer(modifier = Modifier.height(6.dp))
                 Text("点击上方大按钮开始入睡监测，晨起点击结束即可生成", color = Color(0xFF555555), fontSize = 12.sp)
             }
         }
         return
     }
+
+    var selectedIndex by remember(sessions) { mutableIntStateOf(0) }
+    val validIndex = selectedIndex.coerceIn(0, sessions.lastIndex)
+    val session = sessions[validIndex]
 
     val scrollState = rememberScrollState()
     Column(
@@ -474,6 +484,66 @@ fun SleepReportTab(session: SleepSession?) {
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // Date Navigation Bar
+        val dateFormat = remember { SimpleDateFormat("yyyy年MM月dd日", Locale.CHINA) }
+        val dateStr = dateFormat.format(Date(session.startTime))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF151922))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                TextButton(
+                    onClick = { if (validIndex < sessions.lastIndex) selectedIndex = validIndex + 1 },
+                    enabled = validIndex < sessions.lastIndex
+                ) {
+                    Text(
+                        "◀ 前一天",
+                        color = if (validIndex < sessions.lastIndex) Color(0xFF38BDF8) else Color.DarkGray,
+                        fontSize = 13.sp
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = dateStr,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (validIndex == 0) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFF00BFA5).copy(alpha = 0.2f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("最新", color = Color(0xFF00BFA5), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                TextButton(
+                    onClick = { if (validIndex > 0) selectedIndex = validIndex - 1 },
+                    enabled = validIndex > 0
+                ) {
+                    Text(
+                        "后一天 ▶",
+                        color = if (validIndex > 0) Color(0xFF38BDF8) else Color.DarkGray,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+
         // Severity Grade Banner
         val gradeColor = when {
             session.severityLevel.contains("重度") -> Color(0xFFEF4444)
@@ -1103,13 +1173,15 @@ fun TimeSettingDialog(
     initialBedtimeMinute: Int,
     initialWakeupHour: Int,
     initialWakeupMinute: Int,
+    initialCalibration: AppSettings.MicCalibration,
     onDismiss: () -> Unit,
-    onConfirm: (bedHour: Int, bedMin: Int, wakeHour: Int, wakeMin: Int) -> Unit
+    onConfirm: (bedHour: Int, bedMin: Int, wakeHour: Int, wakeMin: Int, cal: AppSettings.MicCalibration) -> Unit
 ) {
     var bedHour by remember { mutableStateOf(initialBedtimeHour) }
     var bedMin by remember { mutableStateOf(initialBedtimeMinute) }
     var wakeHour by remember { mutableStateOf(initialWakeupHour) }
     var wakeMin by remember { mutableStateOf(initialWakeupMinute) }
+    var selectedCalibration by remember { mutableStateOf(initialCalibration) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1168,6 +1240,35 @@ fun TimeSettingDialog(
 
                 HorizontalDivider(color = Color(0xFF2A303C))
 
+                Text("麦克风距离与灵敏度校准:", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    AppSettings.MicCalibration.values().forEach { cal ->
+                        val isSelected = cal == selectedCalibration
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) Color(0xFF00BFA5) else Color(0xFF222834))
+                                .clickable { selectedCalibration = cal }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = cal.label,
+                                color = if (isSelected) Color.White else Color.LightGray,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF2A303C))
+
                 Text("系统防拦截必调权限 (点击直接跳转):", fontSize = 12.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.SemiBold)
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1191,7 +1292,7 @@ fun TimeSettingDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                onConfirm(bedHour, bedMin, wakeHour, wakeMin)
+                onConfirm(bedHour, bedMin, wakeHour, wakeMin, selectedCalibration)
             }) {
                 Text("保存设置", color = Color(0xFF00BFA5), fontWeight = FontWeight.Bold)
             }
