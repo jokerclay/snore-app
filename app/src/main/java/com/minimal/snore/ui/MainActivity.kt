@@ -493,7 +493,7 @@ fun SnoreEventItem(
                     .background(if (isPlaying) Color(0xFF00BFA5) else Color(0xFF222834))
             ) {
                 Icon(
-                    imageVector = if (isPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
+                    imageVector = if (isPlaying) Icons.Default.Close else Icons.Default.PlayArrow,
                     contentDescription = "试听",
                     tint = Color.White
                 )

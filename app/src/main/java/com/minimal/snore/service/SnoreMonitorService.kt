@@ -136,7 +136,7 @@ class SnoreMonitorService : Service() {
             audioRecord?.startRecording()
             val chunk = ShortArray(frameSize)
 
-            while (isRecording && isActive) {
+            while (isRecording) {
                 val readSamples = audioRecord?.read(chunk, 0, frameSize) ?: -1
                 if (readSamples > 0) {
                     circularBuffer.write(chunk, readSamples)
