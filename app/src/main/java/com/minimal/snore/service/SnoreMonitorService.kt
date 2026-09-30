@@ -2,6 +2,7 @@ package com.minimal.snore.service
 
 import android.annotation.SuppressLint
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -107,6 +108,9 @@ class SnoreMonitorService : Service() {
 
     private fun startMonitoring() {
         if (isRecording) return
+
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        nm?.cancel(com.minimal.snore.receiver.AutoSleepReceiver.PROMPT_NOTIFICATION_ID)
 
         acquireWakeLock()
         startForeground(NOTIFICATION_ID, buildNotification("正在监测睡眠声音..."))

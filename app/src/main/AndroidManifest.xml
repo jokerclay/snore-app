@@ -47,6 +47,7 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="com.minimal.snore.ACTION_BEDTIME" />
                 <action android:name="com.minimal.snore.ACTION_WAKEUP" />
+                <action android:name="com.minimal.snore.ACTION_RETRY_CHECK" />
             </intent-filter>
         </receiver>
 

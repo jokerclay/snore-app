@@ -26,7 +26,7 @@ class AutoSleepReceiver : BroadcastReceiver() {
 
         when (action) {
             Intent.ACTION_POWER_CONNECTED -> {
-                // Plugged in during night window
+                // Plugged in during night window (handles any time between bedtime and wakeup)
                 if (settings.autoEnabled && settings.isInNightWindow()) {
                     handleNightTrigger(context, "检测到夜间入睡充电")
                 }
@@ -40,20 +40,32 @@ class AutoSleepReceiver : BroadcastReceiver() {
                 }
             }
 
-            AutoSleepScheduler.ACTION_BEDTIME -> {
-                // Bedtime arrived
-                if (settings.autoEnabled && !SnoreMonitorService.isRunning.value) {
+            AutoSleepScheduler.ACTION_BEDTIME,
+            AutoSleepScheduler.ACTION_RETRY_CHECK -> {
+                if (!settings.autoEnabled || SnoreMonitorService.isRunning.value) {
+                    return
+                }
+
+                // If currently inside night window:
+                if (settings.isInNightWindow()) {
                     val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
                     val isScreenOn = powerManager?.isInteractive ?: false
 
                     if (!isScreenOn) {
-                        handleNightTrigger(context, "已到设定睡眠作息时间")
+                        // Screen is locked/off: auto start monitoring!
+                        handleNightTrigger(context, "夜间作息熄屏自动监测")
                     } else {
-                        // User is still using phone; show lock screen reminder prompt
-                        showBedtimePromptNotification(context, "已到入睡时间，锁屏后点击立即开始监测")
+                        // User is still using phone (screen ON):
+                        // Show lock screen prompt AND schedule a retry in 10 minutes so that
+                        // when the user finishes using the phone and locks it, it starts!
+                        showBedtimePromptNotification(context, "已到夜间入睡时间，锁屏后点击立即开始监测")
+                        AutoSleepScheduler.scheduleRetryCheck(context, 10)
                     }
+                } else {
+                    // Left night window: clean up prompts and schedule normal cycle
+                    dismissPromptNotification(context)
+                    AutoSleepScheduler.scheduleAlarms(context)
                 }
-                AutoSleepScheduler.scheduleAlarms(context)
             }
 
             AutoSleepScheduler.ACTION_WAKEUP -> {
@@ -76,7 +88,7 @@ class AutoSleepReceiver : BroadcastReceiver() {
 
         var started = false
         try {
-            // Attempt direct start (works on Android 11 and below, or when permitted by OEM)
+            // Attempt direct start (works on Android 11 and below, or when permitted by OEM autostart)
             SnoreMonitorService.start(context)
             started = true
         } catch (e: Exception) {

@@ -81,6 +81,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        AutoSleepScheduler.scheduleAlarms(this)
+    }
+
     private fun playAudioClip(filePath: String) {
         try {
             stopAudioClip()
