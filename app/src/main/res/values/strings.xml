@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Snore Monitor</string>
+    <string name="channel_name">睡眠打鼾监测服务</string>
+    <string name="channel_description">用于夜间保持麦克风分析与防后台被杀</string>
+    <string name="notification_title">夜间打鼾监测中</string>
+    <string name="notification_text">正在守护您的睡眠声学分析，请安心入睡</string>
+</resources>

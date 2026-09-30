@@ -1,0 +1,1 @@
+# Minimal Proguard rules
