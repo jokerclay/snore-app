@@ -14,6 +14,19 @@
 
 ---
 
+## 📱 界面预览 (Screenshots)
+
+<p align="center">
+  <img src="doc/images/screenshot_main_monitoring.png" width="300" alt="主监测与打鼾回听界面" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="doc/images/screenshot_dim_mode.png" width="300" alt="夜间纯黑微光防刺眼模式" />
+</p>
+<p align="center">
+  <sub><b>图 1：主监测界面与 5 秒打鼾切片回听</b> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <b>图 2：夜间微光防刺眼模式（AMOLED 纯黑省电）</b></sub>
+</p>
+
+---
+
 ## 📚 官方文档库 (Documentation)
 
 项目包含全套标准化工程文档，位于 `doc/` 目录下：
