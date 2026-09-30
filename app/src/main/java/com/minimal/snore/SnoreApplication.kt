@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import com.minimal.snore.receiver.AutoSleepScheduler
 
 class SnoreApplication : Application() {
     companion object {
@@ -13,6 +14,7 @@ class SnoreApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        AutoSleepScheduler.scheduleAlarms(this)
     }
 
     private fun createNotificationChannel() {

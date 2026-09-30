@@ -47,9 +47,11 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.minimal.snore.data.AppSettings
 import com.minimal.snore.data.SleepSession
 import com.minimal.snore.data.SnoreEvent
 import com.minimal.snore.data.SnoreRepository
+import com.minimal.snore.receiver.AutoSleepScheduler
 import com.minimal.snore.service.SnoreMonitorService
 import java.io.File
 import java.text.SimpleDateFormat
@@ -125,6 +127,10 @@ fun SnoreAppScreen(
     val liveDb by SnoreMonitorService.liveDb.collectAsState()
     val sessionSnoreCount by SnoreMonitorService.snoreCount.collectAsState()
     val sessionApneaCount by SnoreMonitorService.apneaCount.collectAsState()
+
+    val appSettings = remember { AppSettings.getInstance(context) }
+    var autoEnabled by remember { mutableStateOf(appSettings.autoEnabled) }
+    var showTimeDialog by remember { mutableStateOf(false) }
 
     var isNightOledMode by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf(0) } // 0: 睡眠报告, 1: 录音回听
@@ -272,6 +278,39 @@ fun SnoreAppScreen(
             LiveMeterCard(liveDb = liveDb, isRunning = isRunning)
 
             Spacer(modifier = Modifier.height(8.dp))
+
+            // Auto-schedule Card (Tap to edit schedule times)
+            AutoScheduleCard(
+                autoEnabled = autoEnabled,
+                bedtime = String.format(Locale.US, "%02d:%02d", appSettings.bedtimeHour, appSettings.bedtimeMinute),
+                wakeup = String.format(Locale.US, "%02d:%02d", appSettings.wakeupHour, appSettings.wakeupMinute),
+                onToggle = { enabled ->
+                    autoEnabled = enabled
+                    appSettings.autoEnabled = enabled
+                    AutoSleepScheduler.scheduleAlarms(context)
+                },
+                onEditTimes = { showTimeDialog = true }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (showTimeDialog) {
+                TimeSettingDialog(
+                    initialBedtimeHour = appSettings.bedtimeHour,
+                    initialBedtimeMinute = appSettings.bedtimeMinute,
+                    initialWakeupHour = appSettings.wakeupHour,
+                    initialWakeupMinute = appSettings.wakeupMinute,
+                    onDismiss = { showTimeDialog = false },
+                    onConfirm = { bedH, bedM, wakeH, wakeM ->
+                        appSettings.bedtimeHour = bedH
+                        appSettings.bedtimeMinute = bedM
+                        appSettings.wakeupHour = wakeH
+                        appSettings.wakeupMinute = wakeM
+                        AutoSleepScheduler.scheduleAlarms(context)
+                        showTimeDialog = false
+                    }
+                )
+            }
 
             if (isRunning) {
                 OutlinedButton(
@@ -931,4 +970,143 @@ private fun requestIgnoreBatteryOptimizations(context: Context) {
             Toast.makeText(context, "已开启免电池优化，整夜运行更稳定！", Toast.LENGTH_SHORT).show()
         }
     }
+}
+
+@Composable
+fun AutoScheduleCard(
+    autoEnabled: Boolean,
+    bedtime: String,
+    wakeup: String,
+    onToggle: (Boolean) -> Unit,
+    onEditTimes: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onEditTimes() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF151922))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Text("⚡", fontSize = 16.sp)
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = if (autoEnabled) "夜间全自动守候 (已开启)" else "夜间全自动守候 (已关闭)",
+                        color = if (autoEnabled) Color(0xFF38BDF8) else Color.Gray,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "作息: $bedtime 熄屏自启 ➔ $wakeup 自动结算",
+                        color = Color.LightGray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            Switch(
+                checked = autoEnabled,
+                onCheckedChange = onToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Color(0xFF00BFA5)
+                )
+            )
+        }
+    }
+}
+
+@Composable
+fun TimeSettingDialog(
+    initialBedtimeHour: Int,
+    initialBedtimeMinute: Int,
+    initialWakeupHour: Int,
+    initialWakeupMinute: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (bedHour: Int, bedMin: Int, wakeHour: Int, wakeMin: Int) -> Unit
+) {
+    var bedHour by remember { mutableStateOf(initialBedtimeHour) }
+    var bedMin by remember { mutableStateOf(initialBedtimeMinute) }
+    var wakeHour by remember { mutableStateOf(initialWakeupHour) }
+    var wakeMin by remember { mutableStateOf(initialWakeupMinute) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("设置夜间自动守候作息", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    text = "在此时间区间内，只要手机处于锁屏状态或插上充电线，App 将在后台静默自动开始打鼾监测；到起床时间自动结算报告。",
+                    fontSize = 12.sp,
+                    color = Color.Gray
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("入睡时间点:", fontSize = 14.sp, color = Color.White)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { bedHour = (bedHour - 1 + 24) % 24 }) {
+                            Text("◀", color = Color.LightGray, fontSize = 16.sp)
+                        }
+                        Text(
+                            text = String.format(Locale.US, "%02d:%02d", bedHour, bedMin),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF38BDF8)
+                        )
+                        IconButton(onClick = { bedHour = (bedHour + 1) % 24 }) {
+                            Text("▶", color = Color.LightGray, fontSize = 16.sp)
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("晨起时间点:", fontSize = 14.sp, color = Color.White)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { wakeHour = (wakeHour - 1 + 24) % 24 }) {
+                            Text("◀", color = Color.LightGray, fontSize = 16.sp)
+                        }
+                        Text(
+                            text = String.format(Locale.US, "%02d:%02d", wakeHour, wakeMin),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF34D399)
+                        )
+                        IconButton(onClick = { wakeHour = (wakeHour + 1) % 24 }) {
+                            Text("▶", color = Color.LightGray, fontSize = 16.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onConfirm(bedHour, bedMin, wakeHour, wakeMin)
+            }) {
+                Text("保存设置", color = Color(0xFF00BFA5), fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消", color = Color.Gray)
+            }
+        },
+        containerColor = Color(0xFF1C222D)
+    )
 }
