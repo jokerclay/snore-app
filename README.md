@@ -1,5 +1,8 @@
 # 极简打鼾监测 App (Snore App)
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Release](https://img.shields.io/github/v/release/jokerclay/snore-app)](https://github.com/jokerclay/snore-app/releases/tag/v1.1.0)
+
 一个专为个人打造的**极简、轻量、100% 离线、零广告**的睡眠打鼾与呼吸健康监测 Android 原生应用。
 
 - 🔒 **100% 离线与隐私安全**：零网络权限（无 `INTERNET`），音频与健康数据永不出手机，无任何第三方分析或广告 SDK。
@@ -73,3 +76,12 @@ snore-app/
 │   └── archv/                       # 历史设计文档与早期草稿归档
 └── build.bat                        # 本地免安装 4 秒极速编译脚本
 ```
+
+---
+
+## 📄 开源许可证 (License)
+
+本项目遵循 [GNU General Public License v3.0 (GPL-3.0)](LICENSE) 开源许可证。
+
+这意味着你可以自由学习、使用、修改和分发本项目代码，但任何对本项目的二次分发或衍生版本**均必须同样以 GPL-3.0 协议免费开源全部源代码**，杜绝闭源商业垄断。
+
