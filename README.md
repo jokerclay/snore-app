@@ -47,6 +47,14 @@
 ```
 3~4 秒内即可在 `app\build\outputs\apk\debug\app-debug.apk` 输出最新 APK。
 
+#### 🧹 一键深度清理工作区与缓存
+当需要清理构建缓存、中间产物、临时文件以释放磁盘空间时，在根目录下运行：
+```bat
+.\clean.bat   # Windows 平台（支持双击运行）
+./clean.sh    # Linux / macOS / WSL 平台
+```
+将自动停止后台 Gradle 进程，彻底清空 `app/build`、`.gradle` 缓存及日志，瞬间释放数百 MB 存储。
+
 ### 方案 B：GitHub Actions 云端自动构建
 向 `main` 分支提交代码后，GitHub Actions 会自动触发云编译，在仓库的 **Actions** 页面即可下载最新的 `SnoreApp-debug.apk`。
 
@@ -87,7 +95,9 @@ snore-app/
 │   ├── TECH_MANUAL.md               # 技术架构与开发维护手册
 │   ├── USER_MANUAL.md               # 用户使用手册
 │   └── archv/                       # 历史设计文档与早期草稿归档
-└── build.bat                        # 本地免安装 4 秒极速编译脚本
+├── build.bat                        # 本地免安装 4 秒极速编译脚本
+├── clean.bat                        # Windows 一键全量工作区深度清理脚本
+└── clean.sh                         # Linux/macOS 一键工作区清理脚本
 ```
 
 ---
